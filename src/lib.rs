@@ -12,7 +12,7 @@ use uuid::Uuid;
 /// A server in a hypothetical CDS.
 #[derive(Debug)]
 pub struct Server {
-    secret: Scalar,
+    d_s: Scalar,
     users: HashMap<[u8; 8], HashMap<EncodedPoint, EncodedPoint>>,
 }
 
@@ -21,40 +21,39 @@ impl Server {
     /// user IDs.
     pub fn new(rng: impl CryptoRng + RngCore, users: &HashMap<&str, Uuid>) -> Server {
         // Generate a random secret.
-        let secret = Scalar::random(rng);
+        let d_s = Scalar::random(rng);
 
         // Blind the address book.
         let mut blinded = HashMap::with_capacity(users.len());
-        for (phone_number, user_id) in users {
+        for (p, u) in users {
             // Hash the phone number and truncate it to 8 bytes.
-            let hash: [u8; 32] = sha2::Sha256::new()
-                .chain_update(phone_number.as_bytes())
+            let h: [u8; 32] = sha2::Sha256::new()
+                .chain_update(p.as_bytes())
                 .finalize()
                 .into();
-            let prefix: [u8; 8] = hash[..8].try_into().expect("should be 8 bytes");
+            let prefix: [u8; 8] = h[..8].try_into().expect("should be 8 bytes");
 
             // Hash the phone number to a point on the curve and blind it with the server secret.
-            let phone_number = NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(
-                &[phone_number.as_bytes()],
+            let s_p = NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(
+                &[p.as_bytes()],
                 &[b"stupid-psi-tricks"],
             )
             .expect("")
-                * secret;
+                * d_s;
 
             // Encode the user ID as a point and blind it with both the server's secret and the hash of
             // the phone number.
-            let user_id =
-                encode_to_point(user_id) * secret * Scalar::reduce_nonzero_bytes(&hash.into());
+            let s_u = encode_to_point(u) * d_s * Scalar::reduce_nonzero_bytes(&h.into());
 
             // Record the (prefix, phone_number, user_id) row.
             blinded.entry(prefix).or_insert(HashMap::new()).insert(
-                phone_number.to_affine().to_encoded_point(true),
-                user_id.to_affine().to_encoded_point(true),
+                s_p.to_affine().to_encoded_point(true),
+                s_u.to_affine().to_encoded_point(true),
             );
         }
 
         Server {
-            secret,
+            d_s,
             users: blinded,
         }
     }
@@ -63,59 +62,58 @@ impl Server {
     /// point and the bucket of users.
     pub fn find_bucket(
         &self,
-        (prefix, phone_number): ([u8; 8], EncodedPoint),
+        (prefix, c_p): ([u8; 8], EncodedPoint),
     ) -> (EncodedPoint, HashMap<EncodedPoint, EncodedPoint>) {
         // Double-blind the given point.
-        let phone_number = AffinePoint::from_encoded_point(&phone_number).unwrap() * self.secret;
+        let sc_p = AffinePoint::from_encoded_point(&c_p).unwrap() * self.d_s;
 
         // Return the double-blinded point and sets.
         (
-            phone_number.to_encoded_point(true),
+            sc_p.to_encoded_point(true),
             self.users.get(&prefix).cloned().unwrap_or_default(),
         )
     }
 
     /// Given a blinded user ID point, unblind it and recover the encoded UUID.
-    pub fn unblind_user_id(&self, blinded_user_id: &EncodedPoint) -> Option<Uuid> {
+    pub fn unblind_user_id(&self, s_u: &EncodedPoint) -> Option<Uuid> {
         // Unblind the double blinded point, giving us the server's point for this phone number.
-        let user_id = (AffinePoint::from_encoded_point(blinded_user_id).unwrap()
-            * self.secret.invert().unwrap())
-        .to_encoded_point(true);
-        Uuid::from_slice(&user_id.as_bytes()[1..17]).ok()
+        let u = (AffinePoint::from_encoded_point(s_u).unwrap() * self.d_s.invert().unwrap())
+            .to_encoded_point(true);
+        Uuid::from_slice(&u.as_bytes()[1..17]).ok()
     }
 }
 
 /// A client in a hypothetical CDS.
 #[derive(Debug)]
 pub struct Client {
-    secret: Scalar,
+    d_c: Scalar,
 }
 
 impl Client {
     pub fn new(rng: impl CryptoRng + RngCore) -> Client {
         Client {
-            secret: Scalar::random(rng),
+            d_c: Scalar::random(rng),
         }
     }
     /// Initiate a client request for the given phone number. Returns the hash prefix of the phone
     /// number and a blinded phone number point.
-    pub fn request_phone_number(&self, phone_number: &str) -> ([u8; 8], EncodedPoint) {
+    pub fn request_phone_number(&self, p: &str) -> ([u8; 8], EncodedPoint) {
         // Hash the phone number and truncate it to 8 bytes.
-        let hash: [u8; 32] = sha2::Sha256::new()
-            .chain_update(phone_number.as_bytes())
+        let h: [u8; 32] = sha2::Sha256::new()
+            .chain_update(p.as_bytes())
             .finalize()
             .into();
-        let prefix: [u8; 8] = hash[..8].try_into().expect("should be 8 bytes");
+        let prefix: [u8; 8] = h[..8].try_into().expect("should be 8 bytes");
 
         // Hash the phone number to a point on the curve and blind it with the client secret.
-        let phone_number = NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(
-            &[phone_number.as_bytes()],
+        let c_p = NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(
+            &[p.as_bytes()],
             &[b"stupid-psi-tricks"],
         )
         .expect("")
-            * self.secret;
+            * self.d_c;
 
-        (prefix, phone_number.to_affine().to_encoded_point(true))
+        (prefix, c_p.to_affine().to_encoded_point(true))
     }
 
     /// Given a double-blinded phone number point and bucket of users from the server, unblind the
@@ -123,27 +121,24 @@ impl Client {
     /// user ID point, if any can be found.
     pub fn process_bucket(
         &self,
-        (double_blinded_phone_number, users): (EncodedPoint, HashMap<EncodedPoint, EncodedPoint>),
-        phone_number: &str,
+        (sc_p, users): (EncodedPoint, HashMap<EncodedPoint, EncodedPoint>),
+        p: &str,
     ) -> Option<EncodedPoint> {
         // Unblind the double blinded point, giving us the server's point for this phone number.
-        let blinded_point = (AffinePoint::from_encoded_point(&double_blinded_phone_number)
-            .unwrap()
-            * self.secret.invert().unwrap())
-        .to_encoded_point(true);
+        let s_p = (AffinePoint::from_encoded_point(&sc_p).unwrap() * self.d_c.invert().unwrap())
+            .to_encoded_point(true);
 
         // Use it to find the user ID point, if any.
-        if let Some(user_id) = users.get(&blinded_point).cloned() {
+        if let Some(hs_u) = users.get(&s_p).cloned() {
             // Hash the phone number and reduce it to a scalar.
-            let hash: [u8; 32] = sha2::Sha256::new()
-                .chain_update(phone_number.as_bytes())
+            let h: [u8; 32] = sha2::Sha256::new()
+                .chain_update(p.as_bytes())
                 .finalize()
                 .into();
-            let phone_number = Scalar::reduce_nonzero_bytes(&hash.into());
+            let h = Scalar::reduce_nonzero_bytes(&h.into());
 
             // Unblind the user ID point.
-            let user_id =
-                AffinePoint::from_encoded_point(&user_id).unwrap() * phone_number.invert().unwrap();
+            let user_id = AffinePoint::from_encoded_point(&hs_u).unwrap() * h.invert().unwrap();
 
             // Return it.
             Some(user_id.to_affine().to_encoded_point(true))
