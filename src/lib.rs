@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::HashMap;
 
 use p256::elliptic_curve::hash2curve::{ExpandMsgXmd, GroupDigest};
