@@ -53,19 +53,9 @@ impl Server {
 
     /// Given a hash prefix and a blinded phone number point, return the double-blinded phone number
     /// point and the bucket of users.
-    pub fn find_bucket(
-        &self,
-        (prefix, c_p): (Prefix, EncodedPoint),
-    ) -> (EncodedPoint, HashMap<EncodedPoint, EncodedPoint>) {
-        // Decode the point and double-blind it.
-        let c_p = AffinePoint::from_encoded_point(&c_p).expect("should be a valid point");
-        let sc_p = c_p * self.d_s;
-
+    pub fn find_bucket(&self, prefix: Prefix) -> HashMap<EncodedPoint, EncodedPoint> {
         // Find the bucket of blinded phone number and user ID points.
-        let bucket = self.buckets.get(&prefix).cloned().unwrap_or_default();
-
-        // Return the double-blinded point and bucket.
-        (sc_p.to_encoded_point(true), bucket)
+        self.buckets.get(&prefix).cloned().unwrap_or_default()
     }
 
     /// Given a blinded user ID point, unblind it and recover the encoded UUID.
@@ -74,6 +64,12 @@ impl Server {
         let s_u = AffinePoint::from_encoded_point(s_u).expect("should be a valid point");
         let u = (s_u * self.d_s.invert().expect("should be invertible")).to_encoded_point(true);
         Uuid::from_slice(&u.as_bytes()[1..17]).ok()
+    }
+
+    /// Given a client-blinded phone number point, return a double-blinded phone number point.
+    pub fn blind_phone_number(&self, c_p: &EncodedPoint) -> EncodedPoint {
+        let c_p = AffinePoint::from_encoded_point(c_p).expect("should be a valid point");
+        (c_p * self.d_s).to_affine().to_encoded_point(true)
     }
 }
 
@@ -107,13 +103,14 @@ impl Client {
     /// Given a double-blinded phone number point and bucket of users from the server, unblind the
     /// double-blinded point, look for the double-blinded user ID point, and return the unblinded
     /// user ID point, if any can be found.
-    pub fn process_bucket(
+    pub fn find_user_id(
         &self,
-        (sc_p, bucket): (EncodedPoint, HashMap<EncodedPoint, EncodedPoint>),
+        sc_p: &EncodedPoint,
+        bucket: &HashMap<EncodedPoint, EncodedPoint>,
         p: &str,
     ) -> Option<EncodedPoint> {
         // Unblind the double blinded point, giving us the server's point for this phone number.
-        let sc_p = AffinePoint::from_encoded_point(&sc_p).expect("should be a valid point");
+        let sc_p = AffinePoint::from_encoded_point(sc_p).expect("should be a valid point");
         let s_p = (sc_p * self.d_c.invert().expect("should be invertible")).to_encoded_point(true);
 
         // Use it to find the user ID point, if any.
@@ -196,14 +193,17 @@ mod tests {
         let client = Client::new(OsRng);
 
         // Generate a blinded client request.
-        let req = client.request_phone_number("123-456-7890");
+        let (prefix, c_p) = client.request_phone_number("123-456-7890");
+
+        // Send it to the server to be double-blinded.
+        let sc_p = server.blind_phone_number(&c_p);
 
         // Map the blinded request to a map of phone number points to user ID points.
-        let resp = server.find_bucket(req);
+        let bucket = server.find_bucket(prefix);
 
         // Look through the bucket for the phone number and get the blinded user ID.
         let blinded_user_id = client
-            .process_bucket(resp, "123-456-7890")
+            .find_user_id(&sc_p, &bucket, "123-456-7890")
             .expect("should be a valid phone number");
 
         // Send the blinded user ID to the server, which unblinds it.
