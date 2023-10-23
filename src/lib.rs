@@ -62,7 +62,7 @@ impl Server {
         // Find the bucket of blinded phone number and user ID points.
         let bucket = self.buckets.get(&prefix).cloned().unwrap_or_default();
 
-        // Return the double-blinded point and sets.
+        // Return the double-blinded point and bucket.
         (sc_p.to_encoded_point(true), bucket)
     }
 
