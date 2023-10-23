@@ -195,11 +195,11 @@ mod tests {
         // Generate a blinded client request.
         let (prefix, c_p) = client.request_phone_number("123-456-7890");
 
-        // Send it to the server to be double-blinded.
-        let sc_p = server.blind_phone_number(&c_p);
-
-        // Map the blinded request to a map of phone number points to user ID points.
+        // Get the bucket of blinded points where the phone number might be.
         let bucket = server.find_bucket(prefix);
+
+        // Send the blinded phone number point to the server to be double-blinded.
+        let sc_p = server.blind_phone_number(&c_p);
 
         // Look through the bucket for the phone number and get the blinded user ID.
         let blinded_user_id = client
