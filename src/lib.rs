@@ -37,8 +37,8 @@ impl Server {
             // of the phone number.
             let s_u = encode_to_point(u) * d_s * Scalar::reduce_nonzero_bytes(&h.into());
 
-            // Record the (prefix, phone_number, user_id) row.
-            buckets.entry(prefix).or_insert(HashMap::new()).insert(
+            // Record the (prefix, sP, hsU) row.
+            buckets.entry(prefix).or_insert_with(HashMap::new).insert(
                 s_p.to_affine().to_encoded_point(true),
                 s_u.to_affine().to_encoded_point(true),
             );
