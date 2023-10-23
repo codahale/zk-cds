@@ -149,7 +149,7 @@ fn encode_to_point(user_id: &Uuid) -> AffinePoint {
     }
 }
 
-/// Hashes `b` to a point on the P-256 curve using the method in RFC 9380 using SHA-256.
+/// Hash `b` to a point on the P-256 curve using the method in RFC 9380 using SHA-256.
 fn hash_to_curve(b: &[u8]) -> ProjectivePoint {
     NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(&[b], &[b"zk-cds-prototype"])
         .expect("should produce a valid point")
