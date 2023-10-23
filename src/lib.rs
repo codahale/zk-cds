@@ -13,7 +13,7 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct Server {
     d_s: Scalar,
-    buckets: HashMap<[u8; 8], HashMap<EncodedPoint, EncodedPoint>>,
+    buckets: HashMap<Prefix, HashMap<EncodedPoint, EncodedPoint>>,
 }
 
 impl Server {
@@ -28,7 +28,6 @@ impl Server {
         for (p, u) in users {
             // Hash the phone number and truncate it to 8 bytes.
             let h = sha256(p.as_bytes());
-            let prefix: [u8; 8] = h[..8].try_into().expect("should be 8 bytes");
 
             // Hash the phone number to a point on the curve and blind it with the server secret.
             let s_p = hash_to_curve(p.as_bytes()) * d_s;
@@ -38,10 +37,13 @@ impl Server {
             let hs_u = encode_to_point(u) * d_s * Scalar::reduce_nonzero_bytes(&h.into());
 
             // Record the (prefix, sP, hsU) row.
-            buckets.entry(prefix).or_insert_with(HashMap::new).insert(
-                s_p.to_affine().to_encoded_point(true),
-                hs_u.to_affine().to_encoded_point(true),
-            );
+            buckets
+                .entry(prefix(&h))
+                .or_insert_with(HashMap::new)
+                .insert(
+                    s_p.to_affine().to_encoded_point(true),
+                    hs_u.to_affine().to_encoded_point(true),
+                );
         }
 
         Server { d_s, buckets }
@@ -51,7 +53,7 @@ impl Server {
     /// point and the bucket of users.
     pub fn find_bucket(
         &self,
-        (prefix, c_p): ([u8; 8], EncodedPoint),
+        (prefix, c_p): (Prefix, EncodedPoint),
     ) -> (EncodedPoint, HashMap<EncodedPoint, EncodedPoint>) {
         // Decode the point and double-blind it.
         let c_p = AffinePoint::from_encoded_point(&c_p).expect("should be a valid point");
@@ -87,15 +89,15 @@ impl Client {
     }
     /// Initiate a client request for the given phone number. Returns the hash prefix of the phone
     /// number and a blinded phone number point.
-    pub fn request_phone_number(&self, p: &str) -> ([u8; 8], EncodedPoint) {
+    pub fn request_phone_number(&self, p: &str) -> (Prefix, EncodedPoint) {
         // Hash the phone number and truncate it to 8 bytes.
         let h = sha256(p.as_bytes());
-        let prefix: [u8; 8] = h[..8].try_into().expect("should be 8 bytes");
 
         // Hash the phone number to a point on the curve and blind it with the client secret.
         let c_p = hash_to_curve(p.as_bytes()) * self.d_c;
 
-        (prefix, c_p.to_affine().to_encoded_point(true))
+        // Return the hash prefix and the blinded phone number point.
+        (prefix(&h), c_p.to_affine().to_encoded_point(true))
     }
 
     /// Given a double-blinded phone number point and bucket of users from the server, unblind the
@@ -156,6 +158,18 @@ fn hash_to_curve(b: &[u8]) -> ProjectivePoint {
 /// Hash `b` with SHA-256.
 fn sha256(b: &[u8]) -> [u8; 32] {
     sha2::Sha256::new().chain_update(b).finalize().into()
+}
+
+/// A fixed-size prefix of an SHA-256 hash.
+pub type Prefix = [u8; PREFIX_LEN];
+
+const PREFIX_LEN: usize = 8;
+
+/// Return an N-byte prefix
+fn prefix(b: &[u8]) -> Prefix {
+    b[..PREFIX_LEN]
+        .try_into()
+        .expect("should be at least 8 bytes long")
 }
 
 #[cfg(test)]
