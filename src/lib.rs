@@ -82,11 +82,13 @@ pub struct Client {
 }
 
 impl Client {
+    /// Create a new [`Client`] using a random secret.
     pub fn new(rng: impl CryptoRng + RngCore) -> Client {
         Client {
             d_c: Scalar::random(rng),
         }
     }
+
     /// Initiate a client request for the given phone number. Returns the hash prefix of the phone
     /// number and a blinded phone number point.
     pub fn request_phone_number(&self, p: &str) -> (Prefix, EncodedPoint) {
