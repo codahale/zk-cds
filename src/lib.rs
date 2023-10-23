@@ -35,12 +35,12 @@ impl Server {
 
             // Encode the user ID as a point and blind it with both the server's secret and the hash
             // of the phone number.
-            let s_u = encode_to_point(u) * d_s * Scalar::reduce_nonzero_bytes(&h.into());
+            let hs_u = encode_to_point(u) * d_s * Scalar::reduce_nonzero_bytes(&h.into());
 
             // Record the (prefix, sP, hsU) row.
             buckets.entry(prefix).or_insert_with(HashMap::new).insert(
                 s_p.to_affine().to_encoded_point(true),
-                s_u.to_affine().to_encoded_point(true),
+                hs_u.to_affine().to_encoded_point(true),
             );
         }
 
