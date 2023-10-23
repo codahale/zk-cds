@@ -65,8 +65,12 @@ when and if the client attempts to use that client.
 Finally, an attacker attempting to discover whether the server has specific `p` values will be
 unable to do so without making online requests and can thus be rate-limited.
 
+## Bucket Size
+
+Assuming a user base of 100M users, a 15-bit hash prefix would yield buckets of around 3K phone
+numbers, with a total response size of 197KiB. A 12-bit hash prefix would yield buckets of around
+25K phone numbers, with a total response size of 1.54MiB.
+
 ## License
 
 Copyright © 2023 Coda Hale
-
-Distributed under the Apache License 2.0 or MIT License.
