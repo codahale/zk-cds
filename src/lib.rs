@@ -25,18 +25,18 @@ pub struct Server {
 impl Server {
     /// Create a new server with a random secret and the given address book of phone numbers and
     /// user IDs.
-    pub fn new(rng: impl CryptoRng + RngCore, users: &HashMap<&str, Uuid>) -> Server {
+    pub fn new(rng: impl CryptoRng + RngCore, users: &HashMap<u64, Uuid>) -> Server {
         // Generate a random secret.
         let d_s = Scalar::random(rng);
 
         // Blind the address book and group it into buckets by hash prefix.
         let mut buckets = HashMap::new();
-        for (p, u) in users {
+        for (&p, u) in users {
             // Hash the phone number and truncate it to 8 bytes.
-            let h = sha256(p.as_bytes());
+            let h = sha256(p);
 
             // Hash the phone number to a point on the curve and blind it with the server secret.
-            let s_p = hash_to_curve(p.as_bytes()) * d_s;
+            let s_p = hash_to_curve(p) * d_s;
 
             // Encode the user ID as a point and blind it with both the server's secret and the hash
             // of the phone number.
@@ -88,12 +88,12 @@ impl Client {
 
     /// Initiate a client request for the given phone number. Returns the hash prefix of the phone
     /// number and a blinded phone number point.
-    pub fn request_phone_number(&self, p: &str) -> (Prefix, EncodedPoint) {
+    pub fn request_phone_number(&self, p: u64) -> (Prefix, EncodedPoint) {
         // Hash the phone number and truncate it to 8 bytes.
-        let h = sha256(p.as_bytes());
+        let h = sha256(p);
 
         // Hash the phone number to a point on the curve and blind it with the client secret.
-        let c_p = hash_to_curve(p.as_bytes()) * self.d_c;
+        let c_p = hash_to_curve(p) * self.d_c;
 
         // Return the hash prefix and the blinded phone number point.
         (prefix(&h), c_p.to_affine().to_encoded_point(true))
@@ -106,7 +106,7 @@ impl Client {
         &self,
         sc_p: &EncodedPoint,
         bucket: &HashMap<EncodedPoint, EncodedPoint>,
-        p: &str,
+        p: u64,
     ) -> Option<EncodedPoint> {
         // Unblind the double blinded point, giving us the server's point for this phone number.
         let sc_p = AffinePoint::from_encoded_point(sc_p).expect("should be a valid point");
@@ -115,7 +115,7 @@ impl Client {
         // Use it to find the user ID point, if any.
         if let Some(hs_u) = bucket.get(&s_p).cloned() {
             // Hash the phone number and reduce it to a scalar.
-            let h = Scalar::reduce_nonzero_bytes(&sha256(p.as_bytes()).into());
+            let h = Scalar::reduce_nonzero_bytes(&sha256(p).into());
 
             // Unblind the user ID point.
             let hs_u = AffinePoint::from_encoded_point(&hs_u).expect("should be a valid point");
@@ -150,14 +150,14 @@ fn encode_to_point(user_id: &Uuid) -> AffinePoint {
 }
 
 /// Hash `b` to a point on the P-256 curve using the method in RFC 9380 using SHA-256.
-fn hash_to_curve(b: &[u8]) -> ProjectivePoint {
-    NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(&[b], &[b"zk-cds-prototype"])
+fn hash_to_curve(b: u64) -> ProjectivePoint {
+    NistP256::hash_from_bytes::<ExpandMsgXmd<Sha256>>(&[&b.to_be_bytes()], &[b"zk-cds-prototype"])
         .expect("should produce a valid point")
 }
 
 /// Hash `b` with SHA-256.
-fn sha256(b: &[u8]) -> [u8; 32] {
-    sha2::Sha256::new().chain_update(b).finalize().into()
+fn sha256(b: u64) -> [u8; 32] {
+    sha2::Sha256::new().chain_update(b.to_be_bytes()).finalize().into()
 }
 
 /// A fixed-size prefix of an SHA-256 hash.
@@ -179,9 +179,9 @@ mod tests {
     #[test]
     fn round_trip() {
         // Start with a map of phone numbers to user IDs.
-        let mut users = HashMap::<&str, Uuid>::new();
-        users.insert("123-456-7890", Uuid::new_v4());
-        users.insert("123-8675309", Uuid::new_v4());
+        let mut users = HashMap::<u64, Uuid>::new();
+        users.insert(1234567890, Uuid::new_v4());
+        users.insert(1238675309, Uuid::new_v4());
 
         // Initialize a server.
         let server = Server::new(OsRng, &users);
@@ -190,7 +190,7 @@ mod tests {
         let client = Client::new(OsRng);
 
         // Generate a blinded client request.
-        let (prefix, c_p) = client.request_phone_number("123-456-7890");
+        let (prefix, c_p) = client.request_phone_number(1234567890);
 
         // Get the bucket of blinded points where the phone number might be.
         let bucket = server.find_bucket(prefix);
@@ -200,12 +200,12 @@ mod tests {
 
         // Look through the bucket for the phone number and get the blinded user ID.
         let blinded_user_id = client
-            .find_user_id(&sc_p, &bucket, "123-456-7890")
+            .find_user_id(&sc_p, &bucket, 1234567890)
             .expect("should be a valid phone number");
 
         // Send the blinded user ID to the server, which unblinds it.
         let user_id = server.unblind_user_id(&blinded_user_id);
 
-        assert_eq!(user_id, users.get("123-456-7890").cloned());
+        assert_eq!(user_id, users.get(&1234567890).cloned());
     }
 }
