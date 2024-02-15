@@ -2,11 +2,15 @@
 
 use std::collections::HashMap;
 
-use p256::elliptic_curve::hash2curve::{ExpandMsgXmd, GroupDigest};
-use p256::elliptic_curve::ops::ReduceNonZero;
-use p256::elliptic_curve::sec1::{self, FromEncodedPoint, ToEncodedPoint};
-use p256::elliptic_curve::Field;
-use p256::{AffinePoint, EncodedPoint, NistP256, ProjectivePoint, Scalar};
+use p256::{
+    elliptic_curve::{
+        hash2curve::{ExpandMsgXmd, GroupDigest},
+        ops::ReduceNonZero,
+        sec1::{self, FromEncodedPoint, ToEncodedPoint},
+        Field,
+    },
+    AffinePoint, EncodedPoint, NistP256, ProjectivePoint, Scalar,
+};
 use rand::{CryptoRng, RngCore};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -39,13 +43,10 @@ impl Server {
             let hs_u = encode_to_point(u) * d_s * Scalar::reduce_nonzero_bytes(&h.into());
 
             // Record the (prefix, sP, hsU) row.
-            buckets
-                .entry(prefix(&h))
-                .or_insert_with(HashMap::new)
-                .insert(
-                    s_p.to_affine().to_encoded_point(true),
-                    hs_u.to_affine().to_encoded_point(true),
-                );
+            buckets.entry(prefix(&h)).or_insert_with(HashMap::new).insert(
+                s_p.to_affine().to_encoded_point(true),
+                hs_u.to_affine().to_encoded_point(true),
+            );
         }
 
         Server { d_s, buckets }
@@ -82,9 +83,7 @@ pub struct Client {
 impl Client {
     /// Create a new [`Client`] using a random secret.
     pub fn new(rng: impl CryptoRng + RngCore) -> Client {
-        Client {
-            d_c: Scalar::random(rng),
-        }
+        Client { d_c: Scalar::random(rng) }
     }
 
     /// Initiate a client request for the given phone number. Returns the hash prefix of the phone
@@ -168,9 +167,7 @@ const PREFIX_LEN: usize = 8;
 
 /// Return an N-byte prefix
 fn prefix(b: &[u8]) -> Prefix {
-    b[..PREFIX_LEN]
-        .try_into()
-        .expect("should be at least 8 bytes long")
+    b[..PREFIX_LEN].try_into().expect("should be at least 8 bytes long")
 }
 
 #[cfg(test)]
